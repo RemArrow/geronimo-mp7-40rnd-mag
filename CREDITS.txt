@@ -1,0 +1,10 @@
+MP7 40-Round Magazine - GML plugin for Geronimo
+
+3D model and textures: "HK MP7 SMG" by Alpooo
+  https://www.cgtrader.com/free-3d-models/military/gun/smg-mp7
+  Used under CGTrader's Royalty Free License (no AI). The magazine is built into MP7Mag40.dll,
+  encrypted, as that licence asks for use in software. The model may not be extracted from the DLL,
+  redistributed, or used to train AI.
+
+Plugin code by RemArrow. Not affiliated with or endorsed by Alpooo, CGTrader, Heckler & Koch or
+Dark Matter Studios.
