@@ -101,6 +101,8 @@ Verified in game:
 ## Known limitations
 
 - A dropped 40 still collides like the 20 in physics, so its lower part can sink into the floor.
-- **Multiplayer is untested.** The round count is decided by the host. Players without the plugin
-  see the game's 20-round magazine.
+- **Multiplayer:** the round count is decided by the host. Players without the plugin see the game's
+  20-round magazine. Verified in a two-player test (`Utils\MPDev`, 2026-10-13): a client's MP7 came with a
+  40-round magazine on both machines (40/40, the 40's mesh), and its shot, fired by the host, took a round
+  from it.
 - The model's magazine top carries a "30" marking from the original model.

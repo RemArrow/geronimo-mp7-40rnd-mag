@@ -40,6 +40,7 @@ static bool s_assetsTried = false;
 static constexpr ULONGLONG kFillWindowMs = 1500;
 struct Mag {
     ULONGLONG seenAt = 0;
+    int32_t firstAmmo = 0;   // its rounds when first seen
     int32_t stock = 20;      // the capacity the game gave it
     GUObject* look = nullptr;
     GUObject* grab = nullptr;  // the box that makes the 40's lower part grabbable
@@ -181,23 +182,32 @@ static Object AddGrabBox(Object mag) {
     mk.Set("Location", kGrabCentre).Set("Rotation", kGrabTilt).Set("Scale", V3{1, 1, 1}).Call();
     GML_PropInfo xi;
     API->GetPropertyInfo(API->FindProperty((GUStruct*)API->FindFunction(Lib("KismetMathLibrary").Struct(), "MakeTransform"), "ReturnValue"), &xi);
+    // Set up before it registers (deferred), so its physics body is made once, query only, and never
+    // made and destroyed again: in multiplayer the game replicates the magazine's physics, and a body
+    // destroyed under that crashed the host (Geronimo-Win64-Shipping.exe+0x1EDD34D).
     Params add(mag, "AddComponentByClass");
-    add.Set("Class", box).Set("bManualAttachment", true).Set("bDeferredFinish", false);
+    add.Set("Class", box).Set("bManualAttachment", true).Set("bDeferredFinish", true);
     std::memcpy(add.Ptr("RelativeTransform"), mk.Ptr("ReturnValue"), xi.size);
     add.Call();
     Object b = add.Return<GUObject*>();
     if (!b) return {};
-    Params at(b, "K2_AttachToComponent");
-    at.SetObj("Parent", root).Set("SocketName", uint64_t(0)).Set("LocationRule", (uint8_t)0).Set("RotationRule", (uint8_t)0)
-        .Set("ScaleRule", (uint8_t)0).Set("bWeldSimulatedBodies", false).Call();  // KeepRelative: the transform above
     Params ext(b, "SetBoxExtent");
-    ext.Set("InBoxExtent", kGrabExtent).Set("bUpdateOverlaps", true).Call();
+    ext.Set("InBoxExtent", kGrabExtent).Set("bUpdateOverlaps", false).Call();
     Params prof(root, "GetCollisionProfileName");
     prof.Call();
     Params sp(b, "SetCollisionProfileName");
-    sp.Set("InCollisionProfileName", prof.Return<uint64_t>()).Set("bUpdateOverlaps", true).Call();
+    sp.Set("InCollisionProfileName", prof.Return<uint64_t>()).Set("bUpdateOverlaps", false).Call();
+    Params qo(b, "SetCollisionEnabled");
+    qo.Set("NewType", (uint8_t)1).Call();  // QueryOnly: never part of physics
     Params go(b, "SetGenerateOverlapEvents");
     go.Set("bInGenerateOverlapEvents", true).Call();
+    Params fin(mag, "FinishAddComponent");
+    fin.SetObj("Component", b).Set("bManualAttachment", true);
+    std::memcpy(fin.Ptr("RelativeTransform"), mk.Ptr("ReturnValue"), xi.size);
+    fin.Call();
+    Params at(b, "K2_AttachToComponent");
+    at.SetObj("Parent", root).Set("SocketName", uint64_t(0)).Set("LocationRule", (uint8_t)0).Set("RotationRule", (uint8_t)0)
+        .Set("ScaleRule", (uint8_t)0).Set("bWeldSimulatedBodies", false).Call();  // KeepRelative: the transform above
     return b;
 }
 
@@ -216,10 +226,48 @@ static void SyncGrabBox(Object mag, Object b) {
     }
 }
 
+// CurrentAmmo set from here, as the game's own code does it: the game replicates with the push model,
+// which only sends a property its code marked dirty, and magazines can be net-dormant. Without this
+// the other players' machines keep the 20 the magazine was spawned with.
+static void Replicate(Object mag) {
+    Params dirty(Lib("NetPushModelHelpers"), "MarkPropertyDirty");
+    dirty.SetObj("Object", mag).Set("PropertyName", API->MakeName("CurrentAmmo")).Call();
+    Params flush(mag, "FlushNetDormancy");
+    flush.Call();
+    Params update(mag, "ForceNetUpdate");
+    update.Call();
+}
+
+// In someone else's game the host's machine decides how many rounds a magazine holds. If it has this
+// plugin, a fresh MP7 magazine comes with 40; if it doesn't, with 20, and a 40 here would only look like
+// one. So a client dresses magazines once it has seen the host fill one, and leaves them the game's 20
+// if a fresh one is still at 20 a few seconds after it appeared.
+enum class HostFills { Unknown, Yes, No };
+static HostFills s_hostFills = HostFills::Unknown;
+static constexpr ULONGLONG kHostVerdictMs = 4000;
+
+static bool HostAllows(Object mag, Mag& m, ULONGLONG now) {
+    if (CallBool(mag, "HasAuthority")) return true;  // single player, or this machine is the host
+    int32_t ammo = mag.Get<int32_t>("CurrentAmmo");
+    if (ammo > m.stock && s_hostFills != HostFills::Yes) {
+        s_hostFills = HostFills::Yes;
+        Log("the host fills MP7 magazines to 40 ({} has {})", mag.Name(), ammo);
+    }
+    if (s_hostFills == HostFills::Unknown && m.firstAmmo == m.stock && ammo == m.stock && now - m.seenAt > kHostVerdictMs) {
+        s_hostFills = HostFills::No;
+        Message("The host doesn't have MP7 40-Round Magazine: MP7 magazines hold 20 in this game");
+    }
+    return s_hostFills == HostFills::Yes;
+}
+
 static void Dress(Object mag, Mag& m) {
     // Capacity on every machine (the game reads it locally); the round count only where it is decided.
     ULONGLONG now = GetTickCount64();
-    if (!m.seenAt) m.seenAt = now;
+    if (!m.seenAt) {
+        m.seenAt = now;
+        m.firstAmmo = mag.Get<int32_t>("CurrentAmmo");
+    }
+    if (!HostAllows(mag, m, now)) return;
     int32_t cap = mag.Get<int32_t>("AmmoCapacity");
     if (cap != kCapacity) {
         m.stock = cap;
@@ -229,6 +277,7 @@ static void Dress(Object mag, Mag& m) {
         mag.Set("CurrentAmmo", kCapacity);
         Params rep(mag, "OnRep_CurrentAmmo");
         rep.Call();
+        Replicate(mag);
     }
     if (m.look && API->IsValid(m.look)) {
         HideTwenty(mag);  // the game may show them again
@@ -281,10 +330,28 @@ GML_AWAKE() {
         Mag& m = s_mags[mag.ptr];
         Dress(mag, m);
     });
-    On(GML_EVENT_TICK, [](void*) { Watch(); });
-    On(GML_EVENT_WORLD_BEGIN_PLAY, [](void*) {
+    // A level started: GML's WORLD_BEGIN_PLAY where this machine has the game mode (single player, host),
+    // and in someone else's game, where it has none, a new game state.
+    static auto newLevel = [] {
         BuildAssets();     // while the level loads, not when the first magazine shows up
         s_mags.clear();    // a new level's actors can reuse the old ones' addresses
+        s_hostFills = HostFills::Unknown;  // a new game, maybe a different host
+    };
+    On(GML_EVENT_WORLD_BEGIN_PLAY, [](void*) { newLevel(); });
+    On(GML_EVENT_TICK, [](void*) {
+        static ULONGLONG next = 0;
+        static std::string level;
+        if (GetTickCount64() >= next) {
+            next = GetTickCount64() + 500;
+            Params gs(Lib("GameplayStatics"), "GetGameState");
+            gs.SetObj("WorldContextObject", Object(API->WorldContext())).Call();
+            Object state = gs.Return<GUObject*>();
+            if (state && state.FullName() != level) {
+                level = state.FullName();
+                newLevel();
+            }
+        }
+        Watch();
     });
     Message("MP7 40-Round Magazine {} - {}", MP7MAG40_VERSION, s_enabled.Value() ? "MP7 magazines hold 40" : "off");
     Log("{}", MP7MAG40_MODEL_CREDIT);

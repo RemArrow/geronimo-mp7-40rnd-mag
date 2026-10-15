@@ -37,7 +37,10 @@ echo === pack (encrypt Assets\ with a new key)
 cl /nologo /std:c++20 /O2 /MT /EHsc /Fo"%OUT%\obj\\" "%ROOT%tools\pack\pack.cpp" /Fe"%OUT%\pack.exe" || exit /b 1
 "%OUT%\pack.exe" "%ROOT%Assets" "%OUT%\gen\payload.bin" "%OUT%\gen\payload_key.h" || exit /b 1
 echo === plugin (encrypted assets embedded)
-rc /nologo /I "%ROOT%." /fo"%OUT%\obj\MP7Mag40.res" "%ROOT%src\MP7Mag40.rc" || exit /b 1
+rem rc looks for the .rc's build\gen\ files in the current directory first: run it from this plugin's folder
+pushd "%ROOT%" || exit /b 1
+rc /nologo /I "%ROOT%." /fo"%OUT%\obj\MP7Mag40.res" "%ROOT%src\MP7Mag40.rc" || (popd & exit /b 1)
+popd
 cl %CFLAGS% /I"%OUT%\gen" /LD /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\\" "%ROOT%src\*.cpp" "%OUT%\obj\MP7Mag40.res" /Fe"%OUT%\MP7Mag40\MP7Mag40.dll" /link %LFLAGS% || exit /b 1
 echo === test harness (never installed)
 cl %CFLAGS% /LD /Fo"%OUT%\obj\\" /Fd"%OUT%\obj\\" "%ROOT%tests\MP7Mag40Dev\MP7Mag40Dev.cpp" /Fe"%OUT%\tests\MP7Mag40Dev\MP7Mag40Dev.dll" /link %LFLAGS% || exit /b 1

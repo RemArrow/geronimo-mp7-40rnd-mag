@@ -2,8 +2,8 @@
 // version resource (MP7Mag40.rc).
 #pragma once
 
-#define MP7MAG40_VERSION_NUM 0, 1, 0, 0
-#define MP7MAG40_VERSION "0.1.0"
+#define MP7MAG40_VERSION_NUM 0, 2, 0, 0
+#define MP7MAG40_VERSION "0.2.0"
 
 // CGTrader's Royalty Free License (no AI) asks for no credit; it is given anyway. Its terms for use
 // in software (section 21A.3: keep end users from getting at the model, e.g. by encrypting it) are
