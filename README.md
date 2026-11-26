@@ -106,3 +106,7 @@ Verified in game:
   40-round magazine on both machines (40/40, the 40's mesh), and its shot, fired by the host, took a round
   from it.
 - The model's magazine top carries a "30" marking from the original model.
+
+## Shading fix (0.2.1)
+
+GML builds the plugin's textures at runtime, and the engine always samples those as sRGB. That's right for colour maps, but the normal and ORM maps are linear data. Read as sRGB, normals tilted (up to about 50 degrees on a flat map) and roughness came out far too low (0.55 read as 0.26), so surfaces looked glossy, washed out and wrongly lit. The build now packs a staged copy of `Assets\` with every `*_Normal.png` and `*_ORM.png` sRGB-encoded (`tools\srgb`), so the shader reads back the intended values. `Assets\` itself stays linear.
